@@ -1,0 +1,106 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAuthenticated() { return request.auth != null; }
+    function isAdmin() { 
+      return isAuthenticated() && (
+        (request.auth.token.email == "sakindu.app@gmail.com" && request.auth.token.email_verified == true) ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+      ); 
+    }
+    function isValidEmail(email) { return email is string && email.size() >= 3 && email.matches(".*@.*"); }
+
+    function isValidListing(data) {
+      return data.keys().hasAll(['title', 'description', 'location', 'pricePerNight', 'maxGuests', 'createdAt']) &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 100 &&
+             data.description is string && data.description.size() < 5000 &&
+             data.location is string && data.location.size() < 200 &&
+             data.pricePerNight is number && data.pricePerNight >= 0 &&
+             data.maxGuests is number && data.maxGuests > 0 && data.maxGuests <= 50 &&
+             data.createdAt is timestamp &&
+             (!('pricePerWeek' in data) || (data.pricePerWeek is number && data.pricePerWeek >= 0)) &&
+             (!('pricePerMonth' in data) || (data.pricePerMonth is number && data.pricePerMonth >= 0)) &&
+             (!('checkInTime' in data) || (data.checkInTime is string && data.checkInTime.size() < 20)) &&
+             (!('checkOutTime' in data) || (data.checkOutTime is string && data.checkOutTime.size() < 20)) &&
+             (!('amenities' in data) || (data.amenities is list && data.amenities.size() <= 50)) &&
+             (!('houseRules' in data) || (data.houseRules is string && data.houseRules.size() < 2000)) &&
+             (!('photos' in data) || (data.photos is list && data.photos.size() <= 100)) &&
+             (!('airbnbUrl' in data) || (data.airbnbUrl is string && data.airbnbUrl.size() < 500)) &&
+             (!('bookingComUrl' in data) || (data.bookingComUrl is string && data.bookingComUrl.size() < 500)) &&
+             (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidBooking(data) {
+      return data.keys().hasAll(['listingId', 'guestName', 'nationality', 'guestEmail', 'phoneNumber', 'numberOfGuests', 'startDate', 'endDate', 'status', 'totalPrice', 'createdAt']) &&
+             data.listingId is string && data.listingId.size() > 0 &&
+             data.guestName is string && data.guestName.size() > 0 && data.guestName.size() < 100 &&
+             data.nationality is string && data.nationality.size() > 0 && data.nationality.size() < 100 &&
+             data.guestEmail is string && isValidEmail(data.guestEmail) &&
+             data.phoneNumber is string && data.phoneNumber.size() >= 3 && data.phoneNumber.size() < 50 &&
+             data.numberOfGuests is number && data.numberOfGuests > 0 && data.numberOfGuests <= 50 &&
+             data.startDate is timestamp &&
+             data.endDate is timestamp &&
+             data.startDate <= data.endDate &&
+             data.status in ['pending', 'confirmed', 'cancelled'] &&
+             data.totalPrice is number && data.totalPrice >= 0 &&
+             data.createdAt is timestamp &&
+             (!('checkInTime' in data) || (data.checkInTime is string && data.checkInTime.size() < 50)) &&
+             (!('specialRequests' in data) || (data.specialRequests is string && data.specialRequests.size() < 1000));
+    }
+
+    function isValidReview(data) {
+      return data.keys().hasAll(['listingId', 'guestName', 'rating', 'comment', 'createdAt']) &&
+             data.listingId is string && data.listingId.size() > 0 &&
+             data.guestName is string && data.guestName.size() > 0 && data.guestName.size() < 100 &&
+             data.rating is number && data.rating >= 1 && data.rating <= 5 &&
+             data.comment is string && data.comment.size() > 0 && data.comment.size() < 2000 &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidContactMessage(data) {
+      return data.keys().hasAll(['name', 'phone', 'email', 'nationality', 'subject', 'message', 'createdAt']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.phone is string && data.phone.size() > 0 && data.phone.size() < 30 &&
+             data.email is string && isValidEmail(data.email) &&
+             data.nationality is string && data.nationality.size() > 0 && data.nationality.size() < 100 &&
+             data.subject is string && data.subject.size() > 0 && data.subject.size() < 200 &&
+             data.message is string && data.message.size() > 0 && data.message.size() < 5000 &&
+             data.createdAt is timestamp;
+    }
+
+    match /listings/{listingId} {
+      allow read: if true;
+      allow create: if isAdmin() && isValidListing(request.resource.data);
+      allow update: if isAdmin() && isValidListing(request.resource.data) && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isAdmin();
+    }
+
+    match /bookings/{bookingId} {
+      allow read: if true;
+      allow create: if isValidBooking(request.resource.data);
+      allow update: if isAdmin() && isValidBooking(request.resource.data) && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isAdmin();
+    }
+
+    match /external_bookings/{bookingId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    match /reviews/{reviewId} {
+      allow read: if true;
+      allow create: if isValidReview(request.resource.data);
+      allow update, delete: if isAdmin();
+    }
+
+    match /contactMessages/{messageId} {
+      allow create: if isValidContactMessage(request.resource.data);
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow write: if isAdmin();
+    }
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "entities": {
+    "Listing": {
+      "title": "Listing",
+      "description": "An apartment or home available for rent.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "Title of the listing" },
+        "description": { "type": "string", "description": "Detailed description" },
+        "location": { "type": "string", "description": "Location/address" },
+        "pricePerNight": { "type": "number", "description": "Rate per night" },
+        "maxGuests": { "type": "number", "description": "Maximum number of guests allowed" },
+        "checkInTime": { "type": "string", "description": "Check-in time (e.g., 14:00)" },
+        "checkOutTime": { "type": "string", "description": "Check-out time (e.g., 11:00)" },
+        "amenities": { "type": "array", "items": { "type": "string" }, "description": "List of amenities" },
+        "houseRules": { "type": "string", "description": "House rules" },
+        "photos": { "type": "array", "items": { "type": "string" }, "description": "URLs of photos" },
+        "airbnbUrl": { "type": "string", "description": "Airbnb listing URL" },
+        "bookingComUrl": { "type": "string", "description": "Booking.com listing URL" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "description", "location", "pricePerNight", "maxGuests", "createdAt"]
+    },
+    "Booking": {
+      "title": "Booking",
+      "description": "A reservation for a listing.",
+      "type": "object",
+      "properties": {
+        "listingId": { "type": "string", "description": "ID of the booked listing" },
+        "guestName": { "type": "string", "description": "Name of the guest" },
+        "nationality": { "type": "string", "description": "Nationality of the guest" },
+        "guestEmail": { "type": "string", "format": "email", "description": "Email of the guest" },
+        "startDate": { "type": "string", "format": "date-time", "description": "Check-in date" },
+        "endDate": { "type": "string", "format": "date-time", "description": "Check-out date" },
+        "status": { "type": "string", "enum": ["pending", "confirmed", "cancelled"], "description": "Booking status" },
+        "totalPrice": { "type": "number", "description": "Total price for the stay" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["listingId", "guestName", "nationality", "guestEmail", "startDate", "endDate", "status", "totalPrice", "createdAt"]
+    },
+    "ContactMessage": {
+      "title": "ContactMessage",
+      "description": "A message submitted via the contact form.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Name of the sender" },
+        "phone": { "type": "string", "description": "Phone number of the sender" },
+        "email": { "type": "string", "format": "email", "description": "Email of the sender" },
+        "nationality": { "type": "string", "description": "Nationality of the sender" },
+        "subject": { "type": "string", "description": "Subject of the message" },
+        "message": { "type": "string", "description": "Content of the message" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "phone", "email", "nationality", "subject", "message", "createdAt"]
+    }
+  },
+  "firestore": {
+    "listings": {
+      "schema": { "$ref": "#/entities/Listing" },
+      "description": "Collection of all property listings."
+    },
+    "bookings": {
+      "schema": { "$ref": "#/entities/Booking" },
+      "description": "Collection of all bookings."
+    },
+    "contactMessages": {
+      "schema": { "$ref": "#/entities/ContactMessage" },
+      "description": "Collection of all contact messages."
+    }
+  }
+}
