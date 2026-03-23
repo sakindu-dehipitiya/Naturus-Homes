@@ -3,7 +3,7 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import cron from 'node-cron';
 import nodeIcal from 'node-ical';
-import icalGenerator from 'ical-generator';
+import * as icalGenerator from 'ical-generator';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where, Timestamp } from 'firebase/firestore';
 import fs from 'fs';
@@ -114,7 +114,7 @@ async function syncICalFeeds() {
 }
 
 // Schedule cron job to run every 30 minutes
-cron.schedule('*/30 * * * *', () => {
+cron.schedule('*/20 * * * *', () => {
   syncICalFeeds();
 });
 
@@ -163,26 +163,23 @@ async function startServer() {
   });
 
   // Export endpoint for internal bookings
-  app.get('/api/:propertyId-calendar.ics', async (req, res) => {
+  app.get('/api/:propertyNickname-calendar.ics', async (req, res) => {
     try {
-      const propertyId = req.params.propertyId;
+      const propertyNickname = req.params.propertyNickname;
       
-      // Verify listing exists
-      const qListing = query(collection(db, 'listings'));
+      // Verify listing exists by nickname
+      const qListing = query(collection(db, 'listings'), where('nickname', '==', propertyNickname));
       const listingsSnap = await getDocs(qListing);
-      let listingExists = false;
-      let listingName = 'Property';
-      listingsSnap.forEach(doc => {
-        if (doc.id === propertyId) {
-          listingExists = true;
-          listingName = doc.data().title;
-        }
-      });
-
-      if (!listingExists) {
+      
+      if (listingsSnap.empty) {
         return res.status(404).send('Listing not found');
       }
-      const cal = icalGenerator.default({ name: `${listingName} Calendar` });
+      
+      const listingDoc = listingsSnap.docs[0];
+      const propertyId = listingDoc.id;
+      const listingName = listingDoc.data().title;
+      
+      const cal = icalGenerator.default.default({ name: `${listingName} Calendar` });
 
       // Fetch internal bookings
       const qBookings = query(collection(db, 'bookings'), where('listingId', '==', propertyId));
@@ -240,19 +237,123 @@ async function startServer() {
   });
 
   // Vite middleware for development
+  let vite: any;
   if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
+    vite = await createViteServer({
       server: { middlewareMode: true },
-      appType: 'spa',
+      appType: 'custom',
     });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+    app.use(express.static(distPath, { index: false }));
   }
+
+  // Handle /listing/:propertyNickname to inject Open Graph meta tags
+  app.get('/listing/:propertyNickname', async (req, res, next) => {
+    const { propertyNickname } = req.params;
+    try {
+      let listingData: any = null;
+      
+      if (db) {
+        // Try nickname first
+        const qNickname = query(collection(db, 'listings'), where('nickname', '==', propertyNickname));
+        const nicknameSnap = await getDocs(qNickname);
+        
+        if (!nicknameSnap.empty) {
+          listingData = nicknameSnap.docs[0].data();
+          listingData.id = nicknameSnap.docs[0].id;
+        } else {
+          // Fallback to ID
+          const { getDoc } = await import('firebase/firestore');
+          const docRef = doc(db, 'listings', propertyNickname);
+          const docSnap = await getDoc(docRef);
+          if (docSnap.exists()) {
+            listingData = docSnap.data();
+            listingData.id = docSnap.id;
+          }
+        }
+      }
+
+      let template = '';
+      if (process.env.NODE_ENV !== 'production') {
+        template = fs.readFileSync(path.resolve('index.html'), 'utf-8');
+        template = await vite.transformIndexHtml(req.originalUrl, template);
+      } else {
+        template = fs.readFileSync(path.resolve('dist/index.html'), 'utf-8');
+      }
+
+      if (listingData) {
+        let reviewScore = '';
+        let avgRatingStr = '';
+        try {
+          const qReviews = query(collection(db, 'reviews'), where('listingId', '==', listingData.id || propertyNickname));
+          const reviewsSnap = await getDocs(qReviews);
+          if (!reviewsSnap.empty) {
+            const totalRating = reviewsSnap.docs.reduce((acc, doc) => acc + (doc.data().rating || 0), 0);
+            const avgRating = (totalRating / reviewsSnap.docs.length).toFixed(1);
+            avgRatingStr = avgRating;
+            reviewScore = ` • ★ ${avgRating} (${reviewsSnap.docs.length} reviews)`;
+          }
+        } catch (err) {
+          console.error('Error fetching reviews for meta tags:', err);
+        }
+
+        const title = `${listingData.title} ${avgRatingStr ? `| ★${avgRatingStr} ` : ''}| ${listingData.bedrooms} bedrooms | ${listingData.bathrooms} bathrooms`.replace(/"/g, '&quot;');
+        const description = `${listingData.bedrooms} bedrooms • ${listingData.bathrooms} bathrooms${reviewScore}. ${listingData.description ? listingData.description.substring(0, 150) + '...' : ''}`.replace(/"/g, '&quot;');
+        const imageUrl = listingData.photos && listingData.photos.length > 0 ? listingData.photos[0] : 'https://naturushomes.com/favicon.svg';
+        const url = `https://naturushomes.com/listing/${propertyNickname}`;
+
+        const metaTags = `
+          <title>${title}</title>
+          <meta name="description" content="${description}" />
+          <meta property="og:title" content="${title}" />
+          <meta property="og:description" content="${description}" />
+          <meta property="og:image" content="${imageUrl}" />
+          <meta property="og:url" content="${url}" />
+          <meta property="og:type" content="website" />
+          <meta name="twitter:card" content="summary_large_image" />
+          <meta name="twitter:title" content="${title}" />
+          <meta name="twitter:description" content="${description}" />
+          <meta name="twitter:image" content="${imageUrl}" />
+        `;
+        
+        // Remove existing title and description to avoid duplicates
+        template = template.replace(/<title>.*?<\/title>/, '');
+        template = template.replace(/<meta name="description".*?>/, '');
+        template = template.replace(/<meta property="og:.*?".*?>/g, '');
+        template = template.replace(/<meta name="twitter:.*?".*?>/g, '');
+        
+        template = template.replace('</head>', `${metaTags}</head>`);
+      }
+
+      res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+    } catch (e) {
+      if (process.env.NODE_ENV !== 'production') {
+        vite.ssrFixStacktrace(e);
+      }
+      next(e);
+    }
+  });
+
+  // Fallback for all other routes
+  app.get('*', async (req, res, next) => {
+    try {
+      let template = '';
+      if (process.env.NODE_ENV !== 'production') {
+        template = fs.readFileSync(path.resolve('index.html'), 'utf-8');
+        template = await vite.transformIndexHtml(req.originalUrl, template);
+      } else {
+        template = fs.readFileSync(path.resolve('dist/index.html'), 'utf-8');
+      }
+      res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+    } catch (e) {
+      if (process.env.NODE_ENV !== 'production') {
+        vite.ssrFixStacktrace(e);
+      }
+      next(e);
+    }
+  });
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);

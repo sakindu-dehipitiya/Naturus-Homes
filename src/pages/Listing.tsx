@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { doc, getDoc, collection, addDoc, query, where, getDocs, serverTimestamp, orderBy, Timestamp } from 'firebase/firestore';
+import { doc, getDoc, collection, addDoc, query, where, getDocs, serverTimestamp, orderBy, Timestamp, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Listing as ListingType, Review } from '../types';
 import { MapPin, Users, Check, Clock, Info, Star, Loader2, CalendarSync, X, Bed, Bath, Maximize } from 'lucide-react';
@@ -9,12 +9,13 @@ import 'react-day-picker/dist/style.css';
 import { differenceInDays } from 'date-fns';
 import { handleFirestoreError, OperationType } from '../utils/errorHandling';
 import { motion } from 'motion/react';
-import syncICalFeeds from '../../server';
+import { Helmet } from 'react-helmet-async';
 
 export default function Listing() {
-  syncICalFeeds()
-  const { id } = useParams<{ id: string }>();
+  const { idOrNickname } = useParams<{ idOrNickname: string }>();
+  const propertyNickname = idOrNickname;
   const [listing, setListing] = useState<ListingType | null>(null);
+  const [actualId, setActualId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   
   // Booking state
@@ -28,7 +29,10 @@ export default function Listing() {
   const [specialRequests, setSpecialRequests] = useState('');
   
   const [bookingLoading, setBookingLoading] = useState(false);
-  const [bookedDates, setBookedDates] = useState<Date[]>([]);
+  const [internalBookedDates, setInternalBookedDates] = useState<Date[]>([]);
+  const [externalBookedDates, setExternalBookedDates] = useState<Date[]>([]);
+  const bookedDates = [...internalBookedDates, ...externalBookedDates];
+
   const [bookingSuccess, setBookingSuccess] = useState(false);
 
   // Reviews state
@@ -43,63 +47,62 @@ export default function Listing() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchListingAndData = async () => {
-      if (!id) return;
+    if (!propertyNickname) return;
+
+    const fetchListing = async () => {
       try {
         setError(null);
-        const docRef = doc(db, 'listings', id);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          setListing({ id: docSnap.id, ...docSnap.data() } as ListingType);
+        let foundListing: ListingType | null = null;
+        let docId = propertyNickname;
+
+        // Try to find by nickname first
+        const qNickname = query(collection(db, 'listings'), where('nickname', '==', propertyNickname));
+        const nicknameSnap = await getDocs(qNickname);
+        
+        if (!nicknameSnap.empty) {
+          const docSnap = nicknameSnap.docs[0];
+          foundListing = { id: docSnap.id, ...docSnap.data() } as ListingType;
+          docId = docSnap.id;
+        } else {
+          // Fallback to ID
+          const docRef = doc(db, 'listings', propertyNickname);
+          const docSnap = await getDoc(docRef);
+          if (docSnap.exists()) {
+            foundListing = { id: docSnap.id, ...docSnap.data() } as ListingType;
+          }
         }
 
-        // Fetch internal booked dates
-        const qBookings = query(collection(db, 'bookings'), where('listingId', '==', id));
-        const bookingsSnap = await getDocs(qBookings);
-        const dates: Date[] = [];
-        bookingsSnap.forEach(b => {
-          const data = b.data();
-          if (data.status === 'pending' || data.status === 'confirmed') {
-            const start = data.startDate.toDate();
-            const end = data.endDate.toDate();
-            
-            // Internal bookings use local time
-            const localStart = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-            const localEnd = new Date(end.getFullYear(), end.getMonth(), end.getDate());
-            
-            let current = new Date(localStart);
-            while (current <= localEnd) {
-              dates.push(new Date(current));
-              current.setDate(current.getDate() + 1);
-            }
-          }
-        });
+        if (foundListing) {
+          setListing(foundListing);
+          setActualId(docId);
+        } else {
+          setLoading(false);
+        }
+      } catch (err) {
+        console.error("Error fetching listing:", err);
+        try {
+          handleFirestoreError(err, OperationType.GET, `listings/${propertyNickname}`);
+        } catch (e: any) {
+          const parsed = JSON.parse(e.message);
+          setError(parsed.error || 'Failed to fetch listing data');
+        }
+        setLoading(false);
+      }
+    };
 
-        // Fetch external booked dates
-        const qExternalBookings = query(collection(db, 'external_bookings'), where('listingId', '==', id));
-        const externalSnap = await getDocs(qExternalBookings);
-        externalSnap.forEach(b => {
-          const data = b.data();
-          if (data.startDate && data.endDate) {
-            const start = data.startDate.toDate();
-            const end = data.endDate.toDate();
-            
-            // External bookings from iCal are parsed as UTC midnight, so we use UTC components
-            const localStart = new Date(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate());
-            const localEnd = new Date(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate());
-            
-            let current = new Date(localStart);
-            while (current <= localEnd) {
-              dates.push(new Date(current));
-              current.setDate(current.getDate() + 1);
-            }
-          }
-        });
+    fetchListing();
+  }, [propertyNickname]);
 
-        setBookedDates(dates);
+  useEffect(() => {
+    if (!actualId) return;
 
+    let unsubscribeBookings: () => void;
+    let unsubscribeExternal: () => void;
+
+    const fetchRelatedData = async () => {
+      try {
         // Fetch reviews
-        const qReviews = query(collection(db, 'reviews'), where('listingId', '==', id));
+        const qReviews = query(collection(db, 'reviews'), where('listingId', '==', actualId));
         const reviewsSnap = await getDocs(qReviews);
         const fetchedReviews = reviewsSnap.docs
           .map(doc => ({ id: doc.id, ...doc.data() }) as Review)
@@ -109,26 +112,81 @@ export default function Listing() {
              return timeB - timeA;
           });
         setReviews(fetchedReviews);
-
       } catch (err) {
-        console.error("Error fetching data:", err);
-        try {
-          handleFirestoreError(err, OperationType.GET, `listings/${id} or related data`);
-        } catch (e: any) {
-          const parsed = JSON.parse(e.message);
-          setError(parsed.error || 'Failed to fetch listing data');
-        }
+        console.error("Error fetching reviews:", err);
       } finally {
         setLoading(false);
       }
     };
-    fetchListingAndData();
-  }, [id]);
+
+    fetchRelatedData();
+
+    // Real-time listeners for bookings
+    const qBookings = query(collection(db, 'bookings'), where('listingId', '==', actualId));
+    unsubscribeBookings = onSnapshot(qBookings, (snapshot) => {
+      const dates: Date[] = [];
+      snapshot.forEach(b => {
+        const data = b.data();
+        if (data.status === 'pending' || data.status === 'confirmed') {
+          const start = data.startDate.toDate();
+          const end = data.endDate.toDate();
+          
+          const localStart = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+          const localEnd = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+          
+          let current = new Date(localStart);
+          while (current <= localEnd) {
+            dates.push(new Date(current));
+            current.setDate(current.getDate() + 1);
+          }
+        }
+      });
+      setInternalBookedDates(dates);
+    }, (error) => {
+      console.error("Error listening to bookings:", error);
+    });
+
+    // Real-time listeners for external bookings
+    const qExternalBookings = query(collection(db, 'external_bookings'), where('listingId', '==', actualId));
+    unsubscribeExternal = onSnapshot(qExternalBookings, (snapshot) => {
+      const dates: Date[] = [];
+      snapshot.forEach(b => {
+        const data = b.data();
+        if (data.startDate && data.endDate) {
+          const start = data.startDate.toDate();
+          const end = data.endDate.toDate();
+          
+          // External bookings from iCal are parsed as UTC midnight, so we use UTC components
+          const localStart = new Date(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate());
+          const localEnd = new Date(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate());
+          
+          let current = new Date(localStart);
+          while (current <= localEnd) {
+            dates.push(new Date(current));
+            current.setDate(current.getDate() + 1);
+          }
+        }
+      });
+      setExternalBookedDates(dates);
+    }, (error) => {
+      console.error("Error listening to external bookings:", error);
+    });
+
+    return () => {
+      if (unsubscribeBookings) unsubscribeBookings();
+      if (unsubscribeExternal) unsubscribeExternal();
+    };
+  }, [actualId]);
 
   const handleBooking = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!id || !listing || !dateRange?.from || !dateRange?.to) return;
+    if (!actualId || !listing || !dateRange?.from || !dateRange?.to) return;
     
+    if (!/^\+[1-9]\d{1,14}$/.test(phoneNumber.replace(/\s+/g, ''))) {
+      setError('Please enter a valid phone number with a country code (e.g., +1234567890).');
+      return;
+    }
+
     setBookingLoading(true);
 
     try {
@@ -143,8 +201,28 @@ export default function Listing() {
         totalPrice = days * listing.pricePerNight;
       }
 
+      // Check if dates are still available right before booking
+      const localStart = new Date(dateRange.from.getFullYear(), dateRange.from.getMonth(), dateRange.from.getDate());
+      const localEnd = new Date(dateRange.to.getFullYear(), dateRange.to.getMonth(), dateRange.to.getDate());
+      
+      let currentCheck = new Date(localStart);
+      let isAvailable = true;
+      while (currentCheck <= localEnd) {
+        if (bookedDates.some(d => d.getTime() === currentCheck.getTime())) {
+          isAvailable = false;
+          break;
+        }
+        currentCheck.setDate(currentCheck.getDate() + 1);
+      }
+
+      if (!isAvailable) {
+        setError("Sorry, some of the selected dates have just been booked. Please choose different dates.");
+        setBookingLoading(false);
+        return;
+      }
+
       const bookingData: any = {
-        listingId: id,
+        listingId: actualId,
         guestName,
         nationality,
         guestEmail,
@@ -161,18 +239,6 @@ export default function Listing() {
       if (specialRequests) bookingData.specialRequests = specialRequests;
 
       await addDoc(collection(db, 'bookings'), bookingData);
-      
-      // Update local booked dates state so they are immediately blocked
-      const newBookedDates: Date[] = [];
-      const localStart = new Date(dateRange.from.getFullYear(), dateRange.from.getMonth(), dateRange.from.getDate());
-      const localEnd = new Date(dateRange.to.getFullYear(), dateRange.to.getMonth(), dateRange.to.getDate());
-      
-      let current = new Date(localStart);
-      while (current <= localEnd) {
-        newBookedDates.push(new Date(current));
-        current.setDate(current.getDate() + 1);
-      }
-      setBookedDates(prev => [...prev, ...newBookedDates]);
       
       // Send confirmation emails via our backend API
       try {
@@ -240,7 +306,7 @@ export default function Listing() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            to: import.meta.env.VITE_OWNER_EMAIL,
+            to: [import.meta.env.VITE_OWNER_EMAIL, 'dehipitiya@gmail.com'],
             subject: `New Booking: ${listing.title} - ${guestName}`,
             html: ownerEmailHtml
           })
@@ -274,12 +340,12 @@ export default function Listing() {
 
   const handleReviewSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!id) return;
+    if (!actualId) return;
     setReviewSubmitting(true);
     try {
       setError(null);
       const newReview = {
-        listingId: id,
+        listingId: actualId,
         guestName: reviewForm.guestName,
         rating: reviewForm.rating,
         comment: reviewForm.comment,
@@ -355,13 +421,67 @@ export default function Listing() {
   };
 
   return (
-    <motion.div 
+    <motion.article 
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.5 }}
       className="bg-white min-h-screen pb-24"
     >
+      <Helmet>
+        <title>{`${listing.title} ${reviews.length > 0 ? `| ★${(reviews.reduce((acc, r) => acc + r.rating, 0) / reviews.length).toFixed(1)} ` : ''}| ${listing.bedrooms} bedrooms | ${listing.bathrooms} bathrooms`}</title>
+        <meta name="description" content={`${listing.bedrooms} bedrooms • ${listing.bathrooms} bathrooms${reviews.length > 0 ? ` • ★ ${(reviews.reduce((acc, r) => acc + r.rating, 0) / reviews.length).toFixed(1)} (${reviews.length} reviews)` : ''}. ${listing.description.substring(0, 150)}...`} />
+        <meta name="keywords" content={`Sri Lanka accommodations, ${listing.location}, vacation rentals, book direct, ${listing.bedrooms ? `${listing.bedrooms} bedrooms,` : ''} ${listing.bathrooms ? `${listing.bathrooms} bathrooms,` : ''} ${listing.amenities?.slice(0, 3).join(', ')}`} />
+        <meta property="og:title" content={`${listing.title} ${reviews.length > 0 ? `| ★${(reviews.reduce((acc, r) => acc + r.rating, 0) / reviews.length).toFixed(1)} ` : ''}| ${listing.bedrooms} bedrooms | ${listing.bathrooms} bathrooms`} />
+        <meta property="og:description" content={`${listing.bedrooms} bedrooms • ${listing.bathrooms} bathrooms${reviews.length > 0 ? ` • ★ ${(reviews.reduce((acc, r) => acc + r.rating, 0) / reviews.length).toFixed(1)} (${reviews.length} reviews)` : ''}. ${listing.description.substring(0, 150)}...`} />
+        <meta property="og:image" content={listing.photos?.[0] || 'https://naturushomes.com/favicon.svg'} />
+        <meta property="og:url" content={`https://naturushomes.com/listing/${listing.nickname || listing.id}`} />
+        <meta property="og:type" content="website" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content={`${listing.title} ${reviews.length > 0 ? `| ★${(reviews.reduce((acc, r) => acc + r.rating, 0) / reviews.length).toFixed(1)} ` : ''}| ${listing.bedrooms} bedrooms | ${listing.bathrooms} bathrooms`} />
+        <meta name="twitter:description" content={`${listing.bedrooms} bedrooms • ${listing.bathrooms} bathrooms${reviews.length > 0 ? ` • ★ ${(reviews.reduce((acc, r) => acc + r.rating, 0) / reviews.length).toFixed(1)} (${reviews.length} reviews)` : ''}. ${listing.description.substring(0, 150)}...`} />
+        <meta name="twitter:image" content={listing.photos?.[0] || 'https://naturushomes.com/favicon.svg'} />
+        <script type="application/ld+json">
+          {`
+            {
+              "@context": "https://schema.org",
+              "@type": "Accommodation",
+              "name": ${JSON.stringify(listing.title)},
+              "description": ${JSON.stringify(listing.description)},
+              "image": ${JSON.stringify(listing.photos || [])},
+              "url": "https://naturushomes.com/listing/${listing.nickname || listing.id}",
+              "address": {
+                "@type": "PostalAddress",
+                "addressLocality": ${JSON.stringify(listing.location)},
+                "addressCountry": "LK"
+              },
+              "numberOfRooms": ${listing.bedrooms || 1},
+              "numberOfBathroomsTotal": ${listing.bathrooms || 1},
+              "amenityFeature": ${JSON.stringify(
+                (listing.amenities || []).map(amenity => ({
+                  "@type": "LocationFeatureSpecification",
+                  "name": amenity,
+                  "value": true
+                }))
+              )},
+              ${reviews.length > 0 ? `
+              "aggregateRating": {
+                "@type": "AggregateRating",
+                "ratingValue": "${averageRating}",
+                "reviewCount": "${reviews.length}"
+              },` : ''}
+              "offers": {
+                "@type": "Offer",
+                "price": "${listing.pricePerNight}",
+                "priceCurrency": "USD",
+                "availability": "https://schema.org/InStock",
+                "url": "https://naturushomes.com/listing/${listing.nickname || listing.id}"
+              }
+            }
+          `}
+        </script>
+      </Helmet>
+
       {error && (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8">
           <div className="bg-red-50 border-l-4 border-red-500 p-4 relative">
@@ -379,7 +499,7 @@ export default function Listing() {
       )}
 
       {/* Photo Gallery */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <motion.div 
           initial={{ y: 20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
@@ -448,35 +568,35 @@ export default function Listing() {
                 </div>
               ) : displayPhotos.length === 1 ? (
                 <div className="rounded-2xl overflow-hidden h-[50vh] cursor-pointer hover:opacity-90 transition-opacity" onClick={() => setShowGalleryModal(true)}>
-                  <img src={displayPhotos[0]} alt="Gallery" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  <img src={displayPhotos[0]} alt={`${listing.title} - Photo 1`} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                 </div>
               ) : displayPhotos.length === 2 ? (
                 <div className="grid grid-cols-2 gap-2 rounded-2xl overflow-hidden h-[50vh]">
-                  <img onClick={() => setShowGalleryModal(true)} src={displayPhotos[0]} alt="Gallery" className="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity" referrerPolicy="no-referrer" />
-                  <img onClick={() => setShowGalleryModal(true)} src={displayPhotos[1]} alt="Gallery" className="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity" referrerPolicy="no-referrer" />
+                  <img onClick={() => setShowGalleryModal(true)} src={displayPhotos[0]} alt={`${listing.title} - Photo 1`} className="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity" referrerPolicy="no-referrer" />
+                  <img onClick={() => setShowGalleryModal(true)} src={displayPhotos[1]} alt={`${listing.title} - Photo 2`} className="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity" referrerPolicy="no-referrer" />
                 </div>
               ) : displayPhotos.length === 3 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2 rounded-2xl overflow-hidden h-[50vh]">
-                  <img onClick={() => setShowGalleryModal(true)} src={displayPhotos[0]} alt="Gallery" className="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity" referrerPolicy="no-referrer" />
+                  <img onClick={() => setShowGalleryModal(true)} src={displayPhotos[0]} alt={`${listing.title} - Photo 1`} className="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity" referrerPolicy="no-referrer" />
                   <div className="grid grid-rows-2 gap-2 h-full">
-                    <img onClick={() => setShowGalleryModal(true)} src={displayPhotos[1]} alt="Gallery" className="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity" referrerPolicy="no-referrer" />
-                    <img onClick={() => setShowGalleryModal(true)} src={displayPhotos[2]} alt="Gallery" className="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity" referrerPolicy="no-referrer" />
+                    <img onClick={() => setShowGalleryModal(true)} src={displayPhotos[1]} alt={`${listing.title} - Photo 2`} className="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity" referrerPolicy="no-referrer" />
+                    <img onClick={() => setShowGalleryModal(true)} src={displayPhotos[2]} alt={`${listing.title} - Photo 3`} className="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity" referrerPolicy="no-referrer" />
                   </div>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-2 rounded-2xl overflow-hidden h-[50vh]">
                   <div className="md:col-span-2 h-full">
-                    <img onClick={() => setShowGalleryModal(true)} src={displayPhotos[0]} alt="Gallery" className="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity" referrerPolicy="no-referrer" />
+                    <img onClick={() => setShowGalleryModal(true)} src={displayPhotos[0]} alt={`${listing.title} - Photo 1`} className="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity" referrerPolicy="no-referrer" />
                   </div>
                   <div className="grid grid-rows-2 gap-2 h-full hidden md:grid">
-                    <img onClick={() => setShowGalleryModal(true)} src={displayPhotos[1]} alt="Gallery" className="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity" referrerPolicy="no-referrer" />
-                    <img onClick={() => setShowGalleryModal(true)} src={displayPhotos[2]} alt="Gallery" className="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity" referrerPolicy="no-referrer" />
+                    <img onClick={() => setShowGalleryModal(true)} src={displayPhotos[1]} alt={`${listing.title} - Photo 2`} className="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity" referrerPolicy="no-referrer" />
+                    <img onClick={() => setShowGalleryModal(true)} src={displayPhotos[2]} alt={`${listing.title} - Photo 3`} className="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity" referrerPolicy="no-referrer" />
                   </div>
                   <div className="grid grid-rows-2 gap-2 h-full hidden md:grid">
-                    <img onClick={() => setShowGalleryModal(true)} src={displayPhotos[3]} alt="Gallery" className="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity" referrerPolicy="no-referrer" />
+                    <img onClick={() => setShowGalleryModal(true)} src={displayPhotos[3]} alt={`${listing.title} - Photo 4`} className="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity" referrerPolicy="no-referrer" />
                     {displayPhotos.length > 4 ? (
                       <div className="relative h-full cursor-pointer hover:opacity-90 transition-opacity" onClick={() => setShowGalleryModal(true)}>
-                        <img src={displayPhotos[4]} alt="Gallery" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        <img src={displayPhotos[4]} alt={`${listing.title} - Photo 5`} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                         {displayPhotos.length > 5 && (
                           <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-white font-bold text-xl">
                             +{displayPhotos.length - 5} photos
@@ -502,7 +622,7 @@ export default function Listing() {
                   <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 bg-black">
                     <div className="max-w-4xl mx-auto flex flex-col gap-8">
                       {displayPhotos.map((url, idx) => (
-                        <img key={idx} src={url} alt={`Gallery ${idx + 1}`} className="w-full h-auto object-contain max-h-[85vh]" referrerPolicy="no-referrer" />
+                        <img key={idx} src={url} alt={`${listing.title} - Full screen photo ${idx + 1}`} className="w-full h-auto object-contain max-h-[85vh]" referrerPolicy="no-referrer" />
                       ))}
                     </div>
                   </div>
@@ -511,7 +631,7 @@ export default function Listing() {
             </>
           );
         })()}
-      </div>
+      </section>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 grid grid-cols-1 lg:grid-cols-3 gap-12">
         {/* Main Content */}
@@ -536,8 +656,8 @@ export default function Listing() {
               {listing.floorArea !== undefined && (
                 <div className="flex items-center gap-2"><Maximize className="w-5 h-5 text-emerald-600" /> {listing.floorArea} sq ft</div>
               )}
-              <div className="flex items-center gap-2"><Clock className="w-5 h-5 text-emerald-600" /> Check-in: {listing.checkInTime || '14:00'}</div>
-              <div className="flex items-center gap-2"><Clock className="w-5 h-5 text-emerald-600" /> Check-out: {listing.checkOutTime || '11:00'}</div>
+              <div className="flex items-center gap-2"><Clock className="w-5 h-5 text-teal-600" /> Check-in: {listing.checkInTime || '14:00'}</div>
+              <div className="flex items-center gap-2"><Clock className="w-5 h-5 text-teal-600" /> Check-out: {listing.checkOutTime || '11:00'}</div>
             </div>
             <div className="mt-6 text-gray-700 leading-relaxed whitespace-pre-line">
               {listing.description}
@@ -637,7 +757,7 @@ export default function Listing() {
         </motion.div>
 
         {/* Booking Sidebar */}
-        <motion.div 
+        <motion.aside 
           initial={{ x: 20, opacity: 0 }}
           animate={{ x: 0, opacity: 1 }}
           transition={{ duration: 0.6, delay: 0.4 }}
@@ -646,7 +766,7 @@ export default function Listing() {
           <div className="bg-white border border-gray-200 rounded-2xl shadow-xl p-6 sticky top-24">
             <div className="flex justify-between items-end mb-6">
               <div>
-                <span className="text-2xl font-bold text-gray-900">${listing.pricePerNight}</span>
+                <span className="text-2xl font-bold text-gray-900">${listing.pricePerNight} USD</span>
                 <span className="text-gray-500"> / night</span>
               </div>
             </div>
@@ -700,8 +820,8 @@ export default function Listing() {
                   </div>
 
                   <div className="p-4 border-b border-gray-300">
-                    <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Phone (with country code)</label>
-                    <input required type="tel" value={phoneNumber} onChange={e => setPhoneNumber(e.target.value)} className="w-full border border-gray-300 rounded p-2 text-gray-900 placeholder-gray-400" placeholder="+1234567890" />
+                    <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">WhatsApp Number (with country code)</label>
+                    <input required type="tel" value={phoneNumber} onChange={e => setPhoneNumber(e.target.value)} className="w-full border border-gray-300 rounded p-2 text-gray-900 placeholder-gray-400" placeholder="+1 234567890" />
                   </div>
 
                   <div className="p-4 border-b border-gray-300">
@@ -731,7 +851,7 @@ export default function Listing() {
                     
                     <div className="flex justify-between font-bold text-xl pt-4 border-t border-gray-200">
                       <span>Total</span>
-                      <span>${totalPrice.toFixed(2)}</span>
+                      <span>${totalPrice.toFixed(2)} USD</span>
                     </div>
                   </div>
                 )}
@@ -755,8 +875,8 @@ export default function Listing() {
               </form>
             )}
           </div>
-        </motion.div>
+        </motion.aside>
       </div>
-    </motion.div>
+    </motion.article>
   );
 }

@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Building2 } from 'lucide-react';
+import { Leaf } from 'lucide-react';
 import { motion } from 'motion/react';
 
 export default function Navbar() {
@@ -17,16 +17,16 @@ export default function Navbar() {
               <motion.div 
                 whileHover={{ scale: 1.05, rotate: 5 }}
                 whileTap={{ scale: 0.95 }}
-                className="bg-emerald-700 text-white p-2 rounded-lg group-hover:bg-emerald-800 transition-colors"
+                className="bg-teal-700 text-white p-2 rounded-lg group-hover:bg-teal-800 transition-colors"
               >
-                <Building2 className="w-6 h-6" strokeWidth={1.5} />
+                <Leaf className="w-6 h-6" strokeWidth={1.5} />
               </motion.div>
               <div className="flex flex-col justify-center">
                 <span className="text-xl font-bold text-gray-900 tracking-tight leading-none mb-1">
-                  WESTSHORE
+                  NATURUS
                 </span>
-                <span className="text-[0.65rem] uppercase tracking-[0.2em] text-emerald-700 font-semibold leading-none">
-                  Stays
+                <span className="text-[0.65rem] uppercase tracking-[0.2em] text-teal-700 font-semibold leading-none">
+                  Homes
                 </span>
               </div>
             </Link>

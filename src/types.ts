@@ -5,6 +5,7 @@ export interface PhotoCategory {
 
 export interface Listing {
   id: string;
+  nickname: string;
   title: string;
   description: string;
   location: string;

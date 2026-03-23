@@ -6,6 +6,7 @@ import { Link } from 'react-router-dom';
 import { MapPin, Users, Star, Send } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../utils/errorHandling';
 import { motion } from 'motion/react';
+import { Helmet } from 'react-helmet-async';
 
 export default function Home() {
   const [listings, setListings] = useState<Listing[]>([]);
@@ -45,6 +46,10 @@ export default function Home() {
 
   const handleContactSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!/^\+[1-9]\d{1,14}$/.test(contactForm.phone.replace(/\s+/g, ''))) {
+      setError('Please enter a valid phone number with a country code (e.g., +1234567890).');
+      return;
+    }
     setContactStatus('submitting');
     try {
       setError(null);
@@ -80,7 +85,7 @@ export default function Home() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          to: import.meta.env.VITE_OWNER_EMAIL, // Sending to the owner
+          to: [import.meta.env.VITE_OWNER_EMAIL, 'dehipitiya@gmail.com'], // Sending to the owner
           subject: `Contact Form: ${contactForm.subject} - ${contactForm.name}`,
           html: ownerEmailHtml
         })
@@ -109,6 +114,48 @@ export default function Home() {
       transition={{ duration: 0.5 }}
       className="min-h-screen bg-gray-50 flex flex-col"
     >
+        <Helmet>
+        <title>Naturus Homes | Premium Accommodations in Sri Lanka</title>
+        <meta name="description" content="Book serene and exceptional accommodations across Sri Lanka. Experience the true warmth of Sri Lankan hospitality with Naturus Homes." />
+        <meta name="keywords" content="Sri Lanka accommodations, Naturus Homes, vacation rentals, book direct, Sri Lanka travel, premium apartments" />
+        <meta property="og:title" content="Naturus Homes | Premium Accommodations in Sri Lanka" />
+        <meta property="og:description" content="Book serene and exceptional accommodations across Sri Lanka. Experience the true warmth of Sri Lankan hospitality with Naturus Homes." />
+        <meta property="og:image" content="https://naturushomes.com/favicon.svg" />
+        <meta property="og:url" content="https://naturushomes.com/" />
+        <meta property="og:type" content="website" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="Naturus Homes | Premium Accommodations in Sri Lanka" />
+        <meta name="twitter:description" content="Book serene and exceptional accommodations across Sri Lanka. Experience the true warmth of Sri Lankan hospitality with Naturus Homes." />
+        <meta name="twitter:image" content="https://naturushomes.com/favicon.svg" />
+        <script type="application/ld+json">
+          {`
+            {
+              "@context": "https://schema.org",
+              "@graph": [
+                {
+                  "@type": "WebSite",
+                  "name": "Naturus Homes",
+                  "url": "https://naturushomes.com",
+                  "description": "A premier booking website for serene accommodations in different locations across Sri Lanka."
+                },
+                {
+                  "@type": "ItemList",
+                  "itemListElement": [
+                    ${listings.map((listing, index) => `
+                      {
+                        "@type": "ListItem",
+                        "position": ${index + 1},
+                        "url": "https://naturushomes.com/listing/${listing.nickname || listing.id}"
+                      }
+                    `).join(',')}
+                  ]
+                }
+              ]
+            }
+          `}
+        </script>
+      </Helmet>
+
       {error && (
         <div className="bg-red-50 border-l-4 border-red-500 p-4 relative z-50">
           <div className="flex justify-between items-start max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -148,7 +195,7 @@ export default function Home() {
             transition={{ delay: 0.2, duration: 0.8 }}
             className="text-5xl md:text-7xl font-extrabold tracking-tight mb-4"
           >
-            WESTSHORE
+            NATURUS
           </motion.h1>
           <motion.p 
             initial={{ y: 20, opacity: 0 }}
@@ -156,7 +203,7 @@ export default function Home() {
             transition={{ delay: 0.4, duration: 0.8 }}
             className="text-sm md:text-base uppercase tracking-[0.3em] text-emerald-300 font-semibold mb-8"
           >
-            Stays
+            Homes
           </motion.p>
           <motion.p 
             initial={{ y: 20, opacity: 0 }}
@@ -164,7 +211,7 @@ export default function Home() {
             transition={{ delay: 0.6, duration: 0.8 }}
             className="text-xl md:text-2xl max-w-3xl mx-auto font-light text-emerald-100"
           >
-            Experience the true warmth of Sri Lankan hospitality in the heart of the Western Province.
+            Experience the true warmth of Sri Lankan hospitality in beautiful locations across the island.
           </motion.p>
           <motion.div 
             initial={{ y: 20, opacity: 0 }}
@@ -179,8 +226,8 @@ export default function Home() {
         </div>
       </div>
 
-      {/* About Westshore Stays */}
-      <div id="about" className="py-16 bg-white overflow-hidden">
+      {/* About Naturus Homes */}
+      <section id="about" className="py-16 bg-white overflow-hidden">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
             <motion.div
@@ -189,12 +236,12 @@ export default function Home() {
               viewport={{ once: true, margin: "-100px" }}
               transition={{ duration: 0.8 }}
             >
-              <h2 className="text-3xl font-bold text-gray-900 mb-6">Your Host, Westshore Stays</h2>
+              <h2 className="text-3xl font-bold text-gray-900 mb-6">Your Host, Naturus Homes</h2>
               <p className="text-gray-600 mb-4 leading-relaxed">
-                With plenty of experiences in the tourism industry, we are passionate about providing exceptional stays for travelers visiting Sri Lanka. As an accommodation and hospitality provider, our goal is to ensure you feel right at home.
+                With extensive experience in the tourism industry, we are passionate about providing peaceful and exceptional stays for travelers visiting Sri Lanka. As a dedicated accommodation provider, our goal is to ensure you find your perfect serene escape.
               </p>
               <p className="text-gray-600 mb-6 leading-relaxed">
-                We manage premium apartment properties in the Western Province, carefully curated to offer comfort, convenience, and a touch of local charm.
+                We manage premium, tranquil properties in different locations across Sri Lanka, carefully curated to offer comfort, serenity, and a touch of local charm.
               </p>
               <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-6 hover:shadow-md transition-shadow">
                 <h3 className="flex items-center gap-2 text-emerald-800 font-bold text-lg mb-2">
@@ -215,17 +262,17 @@ export default function Home() {
             >
               <img
                 src="https://a0.muscache.com/im/pictures/hosting/Hosting-U3RheVN1cHBseUxpc3Rpbmc6MTQ5NzUwOTgyMzA5Mjc2ODQ3Nw==/original/b96584c5-e268-481d-aa47-c4ba2bc52a5c.jpeg?im_w=1440"
-                alt="WestShore Stays Property"
+                alt="Naturus Homes Property"
                 className="absolute inset-0 w-full h-full object-cover hover:scale-105 transition-transform duration-700"
                 referrerPolicy="no-referrer"
               />
             </motion.div>
           </div>
         </div>
-      </div>
+      </section>
 
       {/* Listings */}
-      <div id="listings" className="py-16 bg-gray-50 flex-grow">
+      <section id="listings" className="py-16 bg-gray-50 flex-grow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <h2 className="text-3xl font-bold text-gray-900 mb-10 text-center">Our Properties</h2>
           
@@ -247,16 +294,16 @@ export default function Home() {
                   viewport={{ once: true, margin: "-50px" }}
                   transition={{ duration: 0.5, delay: index * 0.1 }}
                 >
-                  <Link to={`/listing/${listing.id}`} className="bg-white rounded-2xl shadow-sm hover:shadow-xl transition-all duration-300 overflow-hidden group border border-gray-100 flex flex-col h-full">
+                  <Link to={`/listing/${listing.nickname || listing.id}`} className="bg-white rounded-2xl shadow-sm hover:shadow-xl transition-all duration-300 overflow-hidden group border border-gray-100 flex flex-col h-full">
                     <div className="relative h-64 overflow-hidden shrink-0">
                       <img
-                        src={listing.photos?.[0] || 'https://picsum.photos/seed/apartment/800/600'}
+                        src={listing.photos?.[0] || 'https://picsum.photos/seed/serene/800/600'}
                         alt={listing.title}
                         className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
                         referrerPolicy="no-referrer"
                       />
                       <div className="absolute top-4 right-4 bg-white/90 backdrop-blur-sm px-3 py-1 rounded-full text-sm font-bold text-emerald-700 shadow-sm">
-                        ${listing.pricePerNight} / night
+                        ${listing.pricePerNight} USD / night
                       </div>
                     </div>
                     <div className="p-6 flex flex-col flex-grow">
@@ -280,10 +327,10 @@ export default function Home() {
             </div>
           )}
         </div>
-      </div>
+      </section>
 
       {/* Contact Us Section */}
-      <div id="contact" className="py-16 bg-white">
+      <section id="contact" className="py-16 bg-white">
         <motion.div 
           initial={{ y: 40, opacity: 0 }}
           whileInView={{ y: 0, opacity: 1 }}
@@ -317,8 +364,8 @@ export default function Home() {
                     <input required type="text" value={contactForm.name} onChange={e => setContactForm({...contactForm, name: e.target.value})} className="w-full border border-gray-300 rounded-lg p-3 focus:ring-emerald-500 focus:border-emerald-500" placeholder="Type your name" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
-                    <input required type="tel" value={contactForm.phone} onChange={e => setContactForm({...contactForm, phone: e.target.value})} className="w-full border border-gray-300 rounded-lg p-3 focus:ring-emerald-500 focus:border-emerald-500" placeholder="+1 123 456 7890" />
+                    <label className="block text-sm font-medium text-gray-700 mb-1">WhatsApp Number</label>
+                    <input required type="tel" value={contactForm.phone} onChange={e => setContactForm({...contactForm, phone: e.target.value})} className="w-full border border-gray-300 rounded-lg p-3 focus:ring-emerald-500 focus:border-emerald-500" placeholder="+1 23 456 7890" />
                   </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -350,7 +397,7 @@ export default function Home() {
             )}
           </div>
         </motion.div>
-      </div>
+      </section>
     </motion.div>
   );
 }

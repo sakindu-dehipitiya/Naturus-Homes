@@ -17,7 +17,7 @@ export default function Admin() {
   const [error, setError] = useState<string | null>(null);
   
   const [formData, setFormData] = useState<Partial<Listing>>({
-    title: '', description: '', location: '', pricePerNight: 0, pricePerWeek: 0, pricePerMonth: 0, maxGuests: 1,
+    title: '', nickname: '', description: '', location: '', pricePerNight: 0, pricePerWeek: 0, pricePerMonth: 0, maxGuests: 1,
     floorArea: 0, bedrooms: 1, bathrooms: 1,
     checkInTime: '14:00', checkOutTime: '11:00', amenities: [], houseRules: '', photos: [], categorizedPhotos: [], icalUrls: []
   });
@@ -59,7 +59,7 @@ export default function Admin() {
     return (
       <div className="min-h-[60vh] flex flex-col items-center justify-center">
         <h2 className="text-2xl font-bold mb-4 text-gray-900">Admin Access</h2>
-        <button onClick={login} className="bg-emerald-600 text-white px-6 py-3 rounded-lg flex items-center gap-2 hover:bg-emerald-700 transition-colors">
+        <button onClick={login} className="bg-teal-600 text-white px-6 py-3 rounded-lg flex items-center gap-2 hover:bg-teal-700 transition-colors">
           <LogIn className="w-5 h-5" /> Owner Login
         </button>
       </div>
@@ -77,6 +77,10 @@ export default function Admin() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.nickname || !/^[a-zA-Z0-9-]+$/.test(formData.nickname)) {
+      setError('Nickname can only contain letters, digits, and hyphens.');
+      return;
+    }
     try {
       setError(null);
       // Clean up arrays and categorized photos
@@ -183,7 +187,7 @@ export default function Admin() {
   const openCreateModal = () => {
     setEditingId(null);
     setFormData({
-      title: '', description: '', location: '', pricePerNight: 0, pricePerWeek: 0, pricePerMonth: 0, maxGuests: 1,
+      title: '', nickname: '', description: '', location: '', pricePerNight: 0, pricePerWeek: 0, pricePerMonth: 0, maxGuests: 1,
       floorArea: 0, bedrooms: 1, bathrooms: 1,
       checkInTime: '14:00', checkOutTime: '11:00', amenities: [], houseRules: '', photos: [], categorizedPhotos: [], icalUrls: []
     });
@@ -205,7 +209,7 @@ export default function Admin() {
           <button onClick={logout} className="text-gray-600 hover:text-red-600 flex items-center gap-1">
             <LogOut className="w-4 h-4" /> Logout
           </button>
-          <button onClick={openCreateModal} className="bg-emerald-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-emerald-700">
+          <button onClick={openCreateModal} className="bg-teal-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-teal-700">
             <Plus className="w-5 h-5" /> Add Listing
           </button>
         </div>
@@ -248,7 +252,7 @@ export default function Admin() {
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                     <button 
                       onClick={() => {
-                        const url = `${window.location.origin}/api/${listing.id}-calendar.ics`;
+                        const url = `${window.location.origin}/api/${listing.nickname || listing.id}-calendar.ics`;
                         navigator.clipboard.writeText(url);
                         setCopiedId(listing.id);
                         setTimeout(() => setCopiedId(null), 2000);
@@ -259,7 +263,7 @@ export default function Admin() {
                     </button>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <button onClick={() => openEditModal(listing)} className="text-emerald-600 hover:text-emerald-900 mr-4">
+                    <button onClick={() => openEditModal(listing)} className="text-teal-600 hover:text-teal-900 mr-4">
                       <Edit className="w-5 h-5" />
                     </button>
                     <button onClick={() => handleDelete(listing.id)} className="text-red-600 hover:text-red-900">
@@ -312,6 +316,10 @@ export default function Admin() {
                 <div className="md:col-span-3">
                   <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
                   <input required type="text" value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} className="w-full border border-gray-300 rounded-lg p-2" />
+                </div>
+                <div className="md:col-span-3">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Nickname (URL slug)</label>
+                  <input required type="text" pattern="[a-zA-Z0-9-]+" title="Only letters, digits, and hyphens allowed" value={formData.nickname || ''} onChange={e => setFormData({...formData, nickname: e.target.value})} className="w-full border border-gray-300 rounded-lg p-2" />
                 </div>
                 <div className="md:col-span-3">
                   <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
@@ -398,7 +406,7 @@ export default function Admin() {
               </div>
               <div className="flex justify-end gap-4 pt-4 border-t border-gray-100">
                 <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-gray-600 hover:text-gray-900">Cancel</button>
-                <button type="submit" className="bg-emerald-600 text-white px-6 py-2 rounded-lg hover:bg-emerald-700">Save Listing</button>
+                <button type="submit" className="bg-teal-600 text-white px-6 py-2 rounded-lg hover:bg-teal-700">Save Listing</button>
               </div>
             </form>
           </div>
